@@ -25,24 +25,27 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
         document: vscode.CustomDocument,
         webviewPanel: vscode.WebviewPanel,
     ): Promise<void> {
-        // Netron's source/ directory lives one level above this extension's directory
-        const netronSourcePath = path.join(this.context.extensionPath, '..', 'source');
-        const netronSourceUri = vscode.Uri.file(netronSourcePath);
+        try {
+            // Netron's source/ directory lives one level above this extension's directory
+            const netronSourcePath = path.join(this.context.extensionPath, '..', 'source');
+            const netronSourceUri = vscode.Uri.file(netronSourcePath);
 
-        webviewPanel.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [this.context.extensionUri, netronSourceUri],
-        };
+            webviewPanel.webview.options = {
+                enableScripts: true,
+                localResourceRoots: [this.context.extensionUri, netronSourceUri],
+            };
 
-        webviewPanel.webview.html = this._buildHtml(
-            webviewPanel.webview,
-            netronSourceUri,
-            path.basename(document.uri.fsPath)
-        );
+            webviewPanel.webview.html = this._buildHtml(
+                webviewPanel.webview,
+                netronSourceUri,
+                path.basename(document.uri.fsPath)
+            );
 
-        // Wait for the webview to signal "ready", then send the file bytes
-        const onMessage = webviewPanel.webview.onDidReceiveMessage(async (msg: { command: string }) => {
-            if (msg.command === 'ready') {
+            // Wait for the webview to signal "ready", then send the file bytes
+            const onMessage = webviewPanel.webview.onDidReceiveMessage(async (msg: { command: string }) => {
+                if (msg.command !== 'ready') {
+                    return;
+                }
                 onMessage.dispose();
                 try {
                     const bytes = await vscode.workspace.fs.readFile(document.uri);
@@ -54,8 +57,12 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
                 } catch (err) {
                     vscode.window.showErrorMessage(`Netron: failed to read file – ${err}`);
                 }
-            }
-        });
+            });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`Netron: failed to open editor – ${message}`);
+            throw err; // re-throw so VS Code logs the stack
+        }
     }
 
     private _buildHtml(
@@ -74,8 +81,8 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
 
         const csp = [
             `default-src 'none'`,
-            `script-src ${webview.cspSource}`,
-            `worker-src ${webview.cspSource}`,
+            `script-src ${webview.cspSource} blob:`,
+            `worker-src ${webview.cspSource} blob:`,
             `style-src ${webview.cspSource} 'unsafe-inline'`,
             `img-src ${webview.cspSource} data: blob:`,
             `font-src ${webview.cspSource}`,
