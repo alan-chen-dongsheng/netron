@@ -184,25 +184,33 @@
                 window.exports.browser.Host.prototype.start = async function () {
                     await originalStart.call(this);
 
-                    // Patch view.View.prototype.export to inline color-map styles before
-                    // the canvas is cloned for export. view.js's applyStyleSheet() only
-                    // processes external stylesheets (those with a href), so our inline
-                    // <style id="netron-color-map"> block is silently ignored — the exported
-                    // PNG/SVG comes out with default colors. Fix: before the original export
-                    // runs, apply each CSS rule from our style block directly as an inline
-                    // style (with !important priority) on the matching canvas elements.
-                    // cloneNode(true) then copies these inline styles into the clone, and
-                    // applyStyleSheet's non-!important inline assignments can't override them.
+                    // Patch view.View.prototype.export to preserve color-map colors in exports.
+                    //
+                    // Why the naive approach fails:
+                    //   view.View.export() calls applyStyleSheet(clone, 'grapher.css') which
+                    //   iterates document.styleSheets and only processes sheets with a matching
+                    //   href -- inline <style> blocks (no href) are silently skipped. Even if we
+                    //   pre-apply !important inline styles to the live canvas before export,
+                    //   applyStyleSheet's `node.style[prop] = value` assignment REPLACES the
+                    //   existing !important declaration with a plain (non-important) one.
+                    //
+                    // Fix: intercept XMLSerializer.serializeToString for the duration of one
+                    //   export() call. By that time applyStyleSheet has already run on the clone,
+                    //   so we apply our color-map rules last -- they win. This single intercept
+                    //   covers both SVG (directly serialized) and PNG (serialized to create the
+                    //   <image> src, then rasterized) export paths.
                     if (window.__view__) {
                         var viewProto = Object.getPrototypeOf(window.__view__);
                         var originalViewExport = viewProto.export;
                         viewProto.export = async function (file) {
                             var colorMapStyle = document.getElementById('netron-color-map');
-                            if (colorMapStyle && colorMapStyle.sheet) {
-                                var canvas = document.getElementById('canvas');
-                                if (canvas) {
+                            if (colorMapStyle && colorMapStyle.sheet && colorMapStyle.sheet.cssRules.length > 0) {
+                                var originalSerialize = window.XMLSerializer.prototype.serializeToString;
+                                window.XMLSerializer.prototype.serializeToString = function (node) {
+                                    // Restore before any re-entrant call.
+                                    window.XMLSerializer.prototype.serializeToString = originalSerialize;
                                     var rules = Array.from(colorMapStyle.sheet.cssRules);
-                                    var allNodes = Array.from(canvas.getElementsByTagName('*'));
+                                    var allNodes = node.getElementsByTagName ? Array.from(node.getElementsByTagName('*')) : [];
                                     for (var i = 0; i < allNodes.length; i++) {
                                         for (var j = 0; j < rules.length; j++) {
                                             var rule = rules[j];
@@ -210,17 +218,14 @@
                                                 if (rule.selectorText && allNodes[i].matches(rule.selectorText)) {
                                                     for (var k = 0; k < rule.style.length; k++) {
                                                         var prop = rule.style[k];
-                                                        allNodes[i].style.setProperty(
-                                                            prop,
-                                                            rule.style.getPropertyValue(prop),
-                                                            'important'
-                                                        );
+                                                        allNodes[i].style[prop] = rule.style.getPropertyValue(prop);
                                                     }
                                                 }
-                                            } catch (_) { /* some selectors may throw in matches() */ }
+                                            } catch (_) { /* ignore unsupported selectors */ }
                                         }
                                     }
-                                }
+                                    return originalSerialize.call(this, node);
+                                };
                             }
                             return originalViewExport.call(this, file);
                         };
