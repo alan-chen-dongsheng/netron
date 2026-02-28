@@ -59,15 +59,22 @@
     // browser.Host.worker() creates: new Worker('./worker.js', {type:'module'})
     // That relative path resolves against window.location.href
     // ("vscode-webview://...") and fails to load the worker script.
-    // We wrap preload() so we can patch Host.prototype.worker right after
-    // modules finish loading but before new View(host) is called.
+    // Even with a correct vscode-resource:// URL, browsers block Worker
+    // construction across origins (vscode-webview:// vs file+.vscode-resource...).
+    // Fix: wrap the real script URL in a blob: URL. Blob workers have no
+    // cross-origin restriction, and relative imports inside worker.js still
+    // resolve against the real script URL (ES module base URL semantics).
     var originalPreload = window.exports.preload;
     window.exports.preload = function (callback) {
         originalPreload(function (value, error) {
             if (!error && window.exports.browser && window.exports.browser.Host) {
                 window.exports.browser.Host.prototype.worker = function (id) {
                     var workerUrl = netronBase + id.replace(/^\.\//, '') + '.js';
-                    return new this.window.Worker(workerUrl, { type: 'module' });
+                    var blob = new Blob(
+                        ['import ' + JSON.stringify(workerUrl) + ';'],
+                        { type: 'application/javascript' }
+                    );
+                    return new this.window.Worker(URL.createObjectURL(blob), { type: 'module' });
                 };
             }
             callback(value, error);
