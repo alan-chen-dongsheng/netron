@@ -97,11 +97,13 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
             `<meta http-equiv="Content-Security-Policy" content="${csp}">`
         );
 
-        // 2. Inject netron-base meta tag so vscode-bridge.js can fix the module loader.
-        //    Must come BEFORE index.js runs.
+        // 2. Force light color-scheme so prefers-color-scheme:dark never triggers.
+        //    Without this, VS Code's dark theme causes grapher.css dark-mode rules
+        //    to override the per-category node fill colors, making the graph monochrome.
+        //    Inject netron-base meta tag at the same time for the module loader fix.
         html = html.replace(
             '<meta charset="utf-8">',
-            `<meta charset="utf-8">\n<meta name="netron-base" content="${netronSourceWebviewUri}">`
+            `<meta charset="utf-8">\n<meta name="color-scheme" content="light">\n<meta name="netron-base" content="${netronSourceWebviewUri}">`
         );
 
         // 3. Replace grapher.css with webview URI
