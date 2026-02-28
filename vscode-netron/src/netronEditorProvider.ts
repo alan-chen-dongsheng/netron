@@ -66,6 +66,8 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
         const src = (filename: string) =>
             webview.asWebviewUri(vscode.Uri.joinPath(netronSourceUri, filename)).toString();
 
+        const netronSourceWebviewUri = webview.asWebviewUri(netronSourceUri).toString();
+
         const bridgeUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'vscode-bridge.js')
         ).toString();
@@ -78,32 +80,36 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
             `font-src ${webview.cspSource}`,
         ].join('; ');
 
-        // Read Netron's index.html and do three targeted substitutions:
-        //   1. Replace the CSP meta tag
-        //   2. Replace the grapher.css link
-        //   3. Replace the index.js script tag
-        //   4. Inject the VS Code bridge before </body>
         const indexHtmlPath = path.join(netronSourceUri.fsPath, 'index.html');
         let html = fs.readFileSync(indexHtmlPath, 'utf8');
 
+        // 1. Replace CSP
         html = html.replace(
             /<meta http-equiv="Content-Security-Policy"[^>]*>/,
             `<meta http-equiv="Content-Security-Policy" content="${csp}">`
         );
+
+        // 2. Inject netron-base meta tag so vscode-bridge.js can fix the module loader.
+        //    Must come BEFORE index.js runs.
+        html = html.replace(
+            '<meta charset="utf-8">',
+            `<meta charset="utf-8">\n<meta name="netron-base" content="${netronSourceWebviewUri}">`
+        );
+
+        // 3. Replace grapher.css with webview URI
         html = html.replace(
             /href="grapher\.css"/,
             `href="${src('grapher.css')}"`
         );
+
+        // 4. Load vscode-bridge.js BEFORE index.js so it can override window.exports.require
+        //    before the 'load' event fires.
         html = html.replace(
             /src="index\.js"/,
-            `src="${src('index.js')}"`
-        );
-        html = html.replace(
-            '</body>',
-            `<script type="text/javascript" src="${bridgeUri}"></script>\n</body>`
+            `src="${bridgeUri}"></script>\n<script type="text/javascript" src="${src('index.js')}"`
         );
 
-        // Replace <title>Netron</title> with the model filename
+        // 5. Replace <title>
         html = html.replace(/<title>Netron<\/title>/, `<title>${title}</title>`);
 
         return html;

@@ -1,51 +1,83 @@
 // vscode-bridge.js — runs inside the VS Code webview
-// Bridges VS Code's extension host ↔ Netron's browser runtime.
+// Two responsibilities:
+//  1. Fix Netron's module loader to use the correct webview resource base URL
+//     (source/index.js derives the base from window.location.href which is
+//      vscode-webview://... inside a webview — not a valid resource path).
+//  2. Bridge VS Code extension host ↔ Netron: relay the model file bytes.
 (function () {
     'use strict';
 
-    // acquireVsCodeApi() is injected by VS Code into the webview context.
-    const vscode = acquireVsCodeApi(); // eslint-disable-line no-undef
+    // --- 1. Fix module loader ------------------------------------------------
+    // The extension host injects a <meta name="netron-base"> with the
+    // vscode-resource URI of the Netron source/ directory.
+    var baseMeta = document.querySelector('meta[name="netron-base"]');
+    var netronBase = baseMeta ? baseMeta.content.replace(/\/$/, '') + '/' : '';
 
-    let pendingMessage = null;
+    // Replace window.exports.require with a version that uses the correct base.
+    // This runs synchronously before index.js's window.addEventListener('load')
+    // fires, so we can safely override here.
+    if (netronBase && window.exports && window.exports.require) {
+        window.exports.require = function (id, callback) {
+            if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+                throw new Error("Invalid module '" + id + "'.");
+            }
+            var url = netronBase + id + '.js';
+            var scripts = document.head.getElementsByTagName('script');
+            for (var i = 0; i < scripts.length; i++) {
+                if (url === scripts[i].getAttribute('src')) {
+                    throw new Error("Duplicate import of '" + url + "'.");
+                }
+            }
+            var script = document.createElement('script');
+            script.setAttribute('id', id);
+            script.setAttribute('type', 'module');
+            var loadHandler = function () {
+                script.removeEventListener('load', loadHandler);
+                script.removeEventListener('error', errorHandler);
+                callback();
+            };
+            var errorHandler = function (e) {
+                script.removeEventListener('load', loadHandler);
+                script.removeEventListener('error', errorHandler);
+                callback(null, new Error("The script '" + e.target.src + "' failed to load."));
+            };
+            script.addEventListener('load', loadHandler, false);
+            script.addEventListener('error', errorHandler, false);
+            script.setAttribute('src', url);
+            document.head.appendChild(script);
+        };
+    }
 
-    // Open a model using Netron's internal host API.
+    // --- 2. Bridge extension host ↔ Netron ----------------------------------
+    var vscode = acquireVsCodeApi(); // eslint-disable-line no-undef
+    var pendingMessage = null;
+
     function openModel(msg) {
-        // msg.data is a Uint8Array transferred via structured clone from the extension.
-        const file = new File([msg.data], msg.name);
-        // window.__view__ is set by Netron's index.js bootstrap.
-        // _host._open(file, files) is the internal entry point used by drag-and-drop.
+        var file = new File([msg.data], msg.name);
         window.__view__._host._open(file, [file]);
     }
 
-    // Listen for messages from the extension host.
     window.addEventListener('message', function (event) {
-        const msg = event.data;
+        var msg = event.data;
         if (!msg || msg.command !== 'open') {
             return;
         }
         if (window.__view__) {
             openModel(msg);
         } else {
-            // Netron not yet initialised — hold the message until ready.
             pendingMessage = msg;
         }
     });
 
-    // Poll until Netron's view is initialised, then signal the extension host.
-    const CHECK_INTERVAL_MS = 50;
-    const interval = setInterval(function () {
+    var interval = setInterval(function () {
         if (!window.__view__) {
             return;
         }
         clearInterval(interval);
-
-        // Tell the extension we're ready to receive the file.
         vscode.postMessage({ command: 'ready' });
-
-        // Flush any message that arrived before initialisation finished.
         if (pendingMessage) {
             openModel(pendingMessage);
             pendingMessage = null;
         }
-    }, CHECK_INTERVAL_MS);
+    }, 50);
 }());
