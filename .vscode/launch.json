@@ -2,6 +2,18 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Run Netron Extension",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}/vscode-netron"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/vscode-netron/out/**/*.js"
+            ],
+            "preLaunchTask": "compile vscode-netron"
+        },
+        {
             "name": "Desktop View",
             "type": "chrome",
             "request": "launch",
