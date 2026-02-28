@@ -143,6 +143,14 @@ resolveCustomEditor()
   │    url: vscode-resource://…,          Netron parses & renders the graph
   │    colorMap: {…}                      CSS rules snap onto rendered node elements
   │  })
+  │
+  │  (user clicks Export PNG/SVG)
+  │                                       view.View.export() intercepts XMLSerializer,
+  │                                       applies color-map rules onto clone last,
+  │                                       Host.export() converts Blob → base64
+  │  ◄── postMessage({command:'export',
+  │        name, data:base64})
+  │  showSaveDialog() → writeFile() ────► file saved to disk ✓
 ```
 
 ### WebView compatibility patches (vscode-bridge.js)
@@ -157,3 +165,5 @@ files. This causes three classes of failure that `vscode-bridge.js` fixes:
 | Format parsers fail ("Unsupported file content") | `Host.require()` uses `import('./onnx.js')` — relative URL resolves against webview origin | Patch `Host.prototype.require` to use absolute resource URL |
 | Worker creation fails (cross-origin error) | `new Worker('./worker.js')` can't be accessed from webview origin | Patch `Host.prototype.worker` to wrap script in a Blob URL |
 | `_select.update()` crash | `view.View.start()` has 3 awaits before assigning `this._select`; old polling sent 'ready' too early | Patch `Host.prototype.start` — await real start(), then send 'ready' |
+| Export PNG/SVG does nothing | `<a download>.click()` is silently blocked in the WebView sandbox | Patch `Host.prototype.export` — convert Blob to base64 and post to extension host; host shows Save dialog |
+| Exported PNG/SVG is black/white despite colored display | `view.View.export()` calls `applyStyleSheet(clone, 'grapher.css')` which only processes external stylesheets (href-based); our inline `<style id="netron-color-map">` is skipped. `applyStyleSheet`'s `node.style[prop]=value` also overwrites any `!important` inline styles we pre-apply | Patch `view.View.prototype.export` — intercept `XMLSerializer.serializeToString` once, apply color-map rules onto the clone **after** `applyStyleSheet` finishes, then restore the original serializer |
