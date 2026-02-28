@@ -102,11 +102,13 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
             `href="${src('grapher.css')}"`
         );
 
-        // 4. Load vscode-bridge.js BEFORE index.js so it can override window.exports.require
-        //    before the 'load' event fires.
+        // 4. Load index.js first (it defines window.exports), then vscode-bridge.js
+        //    overrides window.exports.require with the correct base URL.
+        //    The 'load' event fires after both scripts run, so preload() picks up
+        //    the fixed require automatically.
         html = html.replace(
             /src="index\.js"/,
-            `src="${bridgeUri}"></script>\n<script type="text/javascript" src="${src('index.js')}"`
+            `src="${src('index.js')}"></script>\n<script type="text/javascript" src="${bridgeUri}"`
         );
 
         // 5. Replace <title>

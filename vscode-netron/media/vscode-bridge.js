@@ -1,21 +1,23 @@
-// vscode-bridge.js — runs inside the VS Code webview
-// Two responsibilities:
-//  1. Fix Netron's module loader to use the correct webview resource base URL
-//     (source/index.js derives the base from window.location.href which is
-//      vscode-webview://... inside a webview — not a valid resource path).
-//  2. Bridge VS Code extension host ↔ Netron: relay the model file bytes.
+// vscode-bridge.js — runs inside the VS Code webview, after index.js.
+//
+// Execution order in <head>:
+//   1. index.js  → defines window.exports and window.exports.require
+//                  attaches window 'load' listener (not yet fired)
+//   2. this file → overrides window.exports.require with correct base URL
+//                  sets up VS Code message bridge
+//   3. 'load' event fires → index.js handler calls preload() → require()
+//                           now uses the fixed version
 (function () {
     'use strict';
 
-    // --- 1. Fix module loader ------------------------------------------------
-    // The extension host injects a <meta name="netron-base"> with the
+    // --- 1. Fix module loader -----------------------------------------------
+    // index.js builds script URLs from window.location.href which is
+    // "vscode-webview://..." inside a webview — not a valid resource path.
+    // The extension host injects <meta name="netron-base"> with the correct
     // vscode-resource URI of the Netron source/ directory.
     var baseMeta = document.querySelector('meta[name="netron-base"]');
     var netronBase = baseMeta ? baseMeta.content.replace(/\/$/, '') + '/' : '';
 
-    // Replace window.exports.require with a version that uses the correct base.
-    // This runs synchronously before index.js's window.addEventListener('load')
-    // fires, so we can safely override here.
     if (netronBase && window.exports && window.exports.require) {
         window.exports.require = function (id, callback) {
             if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
