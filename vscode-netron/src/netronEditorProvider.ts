@@ -4,15 +4,46 @@ import * as vscode from 'vscode';
 
 export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
-    public static register(context: vscode.ExtensionContext): vscode.Disposable {
-        return vscode.window.registerCustomEditorProvider(
+    /** Map from document URI string → active WebviewPanel, for the "Load Color Map" command. */
+    private readonly _panels = new Map<string, vscode.WebviewPanel>();
+
+    public static register(context: vscode.ExtensionContext): vscode.Disposable[] {
+        const provider = new NetronEditorProvider(context);
+        const editorDisposable = vscode.window.registerCustomEditorProvider(
             'netron.modelView',
-            new NetronEditorProvider(context),
+            provider,
             {
                 webviewOptions: { retainContextWhenHidden: true },
                 supportsMultipleEditorsPerDocument: false,
             }
         );
+
+        // Command: pick a color-map JSON and send it to the currently-focused model editor.
+        const cmdDisposable = vscode.commands.registerCommand('netron.loadColorMap', async () => {
+            const uris = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                filters: { 'JSON Color Map': ['json'] },
+                title: 'Select Netron Color Map JSON',
+            });
+            if (!uris || uris.length === 0) { return; }
+            let colorMap: Record<string, string>;
+            try {
+                colorMap = JSON.parse(fs.readFileSync(uris[0].fsPath, 'utf8'));
+            } catch (e) {
+                vscode.window.showErrorMessage(`Netron: failed to parse color map – ${e instanceof Error ? e.message : String(e)}`);
+                return;
+            }
+            // Find the active model editor panel.
+            const activeUri = vscode.window.activeTextEditor?.document.uri.toString();
+            const panel = activeUri ? provider._panels.get(activeUri) : [...provider._panels.values()].at(-1);
+            if (!panel) {
+                vscode.window.showWarningMessage('Netron: no open model editor found.');
+                return;
+            }
+            panel.webview.postMessage({ command: 'colorMap', colorMap });
+        });
+
+        return [editorDisposable, cmdDisposable];
     }
 
     constructor(private readonly context: vscode.ExtensionContext) {}
@@ -49,6 +80,14 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
                 path.basename(document.uri.fsPath)
             );
 
+            // Track this panel so the "Load Color Map" command can find it.
+            const docKey = document.uri.toString();
+            this._panels.set(docKey, webviewPanel);
+            webviewPanel.onDidDispose(() => this._panels.delete(docKey));
+
+            // Auto-detect a color-map JSON: <modelPath>.colors.json
+            const colorMap = this._tryLoadColorMap(document.uri.fsPath);
+
             // Wait for the webview to signal "ready", then tell it which file to open.
             const onMessage = webviewPanel.webview.onDidReceiveMessage(async (msg: { command: string }) => {
                 if (msg.command !== 'ready') {
@@ -59,6 +98,7 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
                     command: 'open',
                     name: path.basename(document.uri.fsPath),
                     url: fileWebviewUri, // webview-accessible URL; bridge loads via XHR
+                    colorMap: colorMap ?? undefined,
                 });
             });
         } catch (err) {
@@ -66,6 +106,25 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
             vscode.window.showErrorMessage(`Netron: failed to open editor – ${message}`);
             throw err; // re-throw so VS Code logs the stack
         }
+    }
+
+    /**
+     * Try to load a color-map JSON from `<modelPath>.colors.json`.
+     * Returns the parsed object, or null if the file doesn't exist or fails to parse.
+     */
+    private _tryLoadColorMap(modelFsPath: string): Record<string, string> | null {
+        const colorMapPath = modelFsPath + '.colors.json';
+        try {
+            if (fs.existsSync(colorMapPath)) {
+                const raw = JSON.parse(fs.readFileSync(colorMapPath, 'utf8'));
+                if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+                    return raw as Record<string, string>;
+                }
+            }
+        } catch (_) {
+            // Silently ignore; color map is optional
+        }
+        return null;
     }
 
     private _buildHtml(

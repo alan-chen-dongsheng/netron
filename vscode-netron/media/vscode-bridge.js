@@ -62,7 +62,45 @@
     var vscode = acquireVsCodeApi(); // eslint-disable-line no-undef
     var pendingMessage = null;
 
+    // Compute white/black contrast text color for a given CSS hex color string.
+    function getContrastColor(color) {
+        var m = String(color).replace(/\s/g, '').match(/^#([0-9a-f]{6})$/i);
+        if (m) {
+            var r = parseInt(m[1].substr(0, 2), 16);
+            var g = parseInt(m[1].substr(2, 2), 16);
+            var b = parseInt(m[1].substr(4, 2), 16);
+            return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5 ? '#000000' : '#ffffff';
+        }
+        return '#ffffff';
+    }
+
+    // Inject (or replace) a <style> block that overrides each named node's fill color.
+    // colorMap: { [nodeName: string]: cssColorString }
+    function injectColorMap(colorMap) {
+        if (!colorMap || typeof colorMap !== 'object') { return; }
+        var rules = [];
+        for (var name in colorMap) {
+            if (!Object.prototype.hasOwnProperty.call(colorMap, name)) { continue; }
+            var color = colorMap[name];
+            var escapedId = CSS.escape('node-name-' + name);
+            var textColor = getContrastColor(color);
+            rules.push('#' + escapedId + ' .node-item-type path { fill: ' + color + ' !important; }');
+            rules.push('#' + escapedId + ' .node-item-type text { fill: ' + textColor + ' !important; }');
+        }
+        var existing = document.getElementById('netron-color-map');
+        if (existing) { existing.remove(); }
+        if (rules.length > 0) {
+            var style = document.createElement('style');
+            style.id = 'netron-color-map';
+            style.textContent = rules.join('\n');
+            document.head.appendChild(style);
+        }
+    }
+
     function openModel(msg) {
+        if (msg.colorMap) {
+            injectColorMap(msg.colorMap);
+        }
         if (msg.url) {
             // URL-based loading: avoids Uint8Array→JSON→corruption in postMessage.
             // host._openModel() uses XHR to fetch from the vscode-resource URL
@@ -81,9 +119,13 @@
 
     window.addEventListener('message', function (event) {
         var msg = event.data;
-        if (!msg || msg.command !== 'open') {
+        if (!msg) { return; }
+        // Live color-map update (sent by the "Load Color Map" command without reopening the model).
+        if (msg.command === 'colorMap') {
+            injectColorMap(msg.colorMap);
             return;
         }
+        if (msg.command !== 'open') { return; }
         // If start() is already done (view ready), open immediately.
         // Otherwise save as pendingMessage; start() wrapper will process it.
         if (window.__viewReady__) {

@@ -10,6 +10,13 @@
     "activationEvents": [],
     "main": "./out/extension.js",
     "contributes": {
+        "commands": [
+            {
+                "command": "netron.loadColorMap",
+                "title": "Load Color Map",
+                "category": "Netron"
+            }
+        ],
         "customEditors": [
             {
                 "viewType": "netron.modelView",
