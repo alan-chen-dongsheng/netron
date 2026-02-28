@@ -75,6 +75,7 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
         const csp = [
             `default-src 'none'`,
             `script-src ${webview.cspSource}`,
+            `worker-src ${webview.cspSource}`,
             `style-src ${webview.cspSource} 'unsafe-inline'`,
             `img-src ${webview.cspSource} data: blob:`,
             `font-src ${webview.cspSource}`,
