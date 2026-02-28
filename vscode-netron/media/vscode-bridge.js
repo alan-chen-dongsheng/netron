@@ -76,6 +76,18 @@
             return;
         }
         clearInterval(interval);
+
+        // Patch host.worker() to use the correct webview resource URL.
+        // browser.Host.worker() does: new Worker('./worker.js', {type:'module'})
+        // The relative URL resolves against vscode-webview://... which doesn't
+        // serve files, so the worker script 404s and fires an 'error' event →
+        // "Unknown worker error type 'error'".
+        var host = window.__view__._host;
+        host.worker = function (id) {
+            var filename = (id || './worker').replace(/^\.\//, '') + '.js';
+            return new window.Worker(netronBase + filename, { type: 'module' });
+        };
+
         vscode.postMessage({ command: 'ready' });
         if (pendingMessage) {
             openModel(pendingMessage);
