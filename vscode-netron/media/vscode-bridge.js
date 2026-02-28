@@ -96,8 +96,20 @@
     var pendingMessage = null;
 
     function openModel(msg) {
-        var file = new File([msg.data], msg.name);
-        window.__view__._host._open(file, [file]);
+        if (msg.url) {
+            // URL-based loading: avoids Uint8Array→JSON→corruption in postMessage.
+            // host._openModel() uses XHR to fetch from the vscode-resource URL
+            // and then renders the graph, same as when the user drags a file in.
+            window.__view__._host._openModel(msg.url, null, msg.name);
+        } else if (msg.data) {
+            // Fallback: binary transfer (kept for compatibility)
+            var raw = msg.data;
+            var data = (raw instanceof Uint8Array) ? raw : new Uint8Array(
+                Array.isArray(raw) ? raw : Object.values(raw)
+            );
+            var file = new File([data], msg.name);
+            window.__view__._host._open(file, [file]);
+        }
     }
 
     window.addEventListener('message', function (event) {
