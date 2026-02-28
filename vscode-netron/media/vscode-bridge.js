@@ -183,6 +183,49 @@
                 var originalStart = window.exports.browser.Host.prototype.start;
                 window.exports.browser.Host.prototype.start = async function () {
                     await originalStart.call(this);
+
+                    // Patch view.View.prototype.export to inline color-map styles before
+                    // the canvas is cloned for export. view.js's applyStyleSheet() only
+                    // processes external stylesheets (those with a href), so our inline
+                    // <style id="netron-color-map"> block is silently ignored — the exported
+                    // PNG/SVG comes out with default colors. Fix: before the original export
+                    // runs, apply each CSS rule from our style block directly as an inline
+                    // style (with !important priority) on the matching canvas elements.
+                    // cloneNode(true) then copies these inline styles into the clone, and
+                    // applyStyleSheet's non-!important inline assignments can't override them.
+                    if (window.__view__) {
+                        var viewProto = Object.getPrototypeOf(window.__view__);
+                        var originalViewExport = viewProto.export;
+                        viewProto.export = async function (file) {
+                            var colorMapStyle = document.getElementById('netron-color-map');
+                            if (colorMapStyle && colorMapStyle.sheet) {
+                                var canvas = document.getElementById('canvas');
+                                if (canvas) {
+                                    var rules = Array.from(colorMapStyle.sheet.cssRules);
+                                    var allNodes = Array.from(canvas.getElementsByTagName('*'));
+                                    for (var i = 0; i < allNodes.length; i++) {
+                                        for (var j = 0; j < rules.length; j++) {
+                                            var rule = rules[j];
+                                            try {
+                                                if (rule.selectorText && allNodes[i].matches(rule.selectorText)) {
+                                                    for (var k = 0; k < rule.style.length; k++) {
+                                                        var prop = rule.style[k];
+                                                        allNodes[i].style.setProperty(
+                                                            prop,
+                                                            rule.style.getPropertyValue(prop),
+                                                            'important'
+                                                        );
+                                                    }
+                                                }
+                                            } catch (_) { /* some selectors may throw in matches() */ }
+                                        }
+                                    }
+                                }
+                            }
+                            return originalViewExport.call(this, file);
+                        };
+                    }
+
                     window.__viewReady__ = true;
                     vscode.postMessage({ command: 'ready' });
                     if (pendingMessage) {
