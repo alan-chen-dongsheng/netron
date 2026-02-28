@@ -68,6 +68,16 @@
     window.exports.preload = function (callback) {
         originalPreload(function (value, error) {
             if (!error && window.exports.browser && window.exports.browser.Host) {
+                // Fix Host.require(): browser.Host.require(id) does import(`${id}.js`)
+                // which resolves the relative URL against vscode-webview://... and fails.
+                // All format parsers (onnx, pytorch, etc.) are loaded this way on demand,
+                // so every model open would end with "Unsupported file content".
+                window.exports.browser.Host.prototype.require = function (id) {
+                    var url = netronBase + id.replace(/^\.\//, '') + '.js';
+                    return import(url);
+                };
+
+                // Fix Host.worker(): blob URL workaround for cross-origin restriction.
                 window.exports.browser.Host.prototype.worker = function (id) {
                     var workerUrl = netronBase + id.replace(/^\.\//, '') + '.js';
                     var blob = new Blob(
