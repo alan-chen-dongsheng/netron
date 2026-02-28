@@ -88,18 +88,20 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
             // Auto-detect a color-map JSON: <modelPath>.colors.json
             const colorMap = this._tryLoadColorMap(document.uri.fsPath);
 
-            // Wait for the webview to signal "ready", then tell it which file to open.
-            const onMessage = webviewPanel.webview.onDidReceiveMessage(async (msg: { command: string }) => {
-                if (msg.command !== 'ready') {
-                    return;
+            // Persistent message listener: handles 'ready' (send open) and 'export' (save file).
+            let opened = false;
+            webviewPanel.webview.onDidReceiveMessage(async (msg: { command: string; name?: string; mime?: string; data?: string }) => {
+                if (msg.command === 'ready' && !opened) {
+                    opened = true;
+                    webviewPanel.webview.postMessage({
+                        command: 'open',
+                        name: path.basename(document.uri.fsPath),
+                        url: fileWebviewUri,
+                        colorMap: colorMap ?? undefined,
+                    });
+                } else if (msg.command === 'export' && msg.name && msg.data) {
+                    await this._handleExport(document.uri, msg.name, msg.data);
                 }
-                onMessage.dispose();
-                webviewPanel.webview.postMessage({
-                    command: 'open',
-                    name: path.basename(document.uri.fsPath),
-                    url: fileWebviewUri, // webview-accessible URL; bridge loads via XHR
-                    colorMap: colorMap ?? undefined,
-                });
             });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -125,6 +127,27 @@ export class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider
             // Silently ignore; color map is optional
         }
         return null;
+    }
+
+    /**
+     * Handle an export request from the webview.
+     * Shows VS Code's native Save dialog, then writes the base64-encoded file.
+     */
+    private async _handleExport(modelUri: vscode.Uri, name: string, base64Data: string): Promise<void> {
+        const ext = path.extname(name).toLowerCase().replace('.', '');
+        const filters: { [name: string]: string[] } = ext === 'svg'
+            ? { 'SVG Image': ['svg'] }
+            : { 'PNG Image': ['png'] };
+        const defaultUri = vscode.Uri.file(path.join(path.dirname(modelUri.fsPath), name));
+        const saveUri = await vscode.window.showSaveDialog({ defaultUri, filters, title: 'Export Model Graph' });
+        if (!saveUri) { return; }
+        try {
+            const buffer = Buffer.from(base64Data, 'base64');
+            await vscode.workspace.fs.writeFile(saveUri, buffer);
+            vscode.window.showInformationMessage(`Netron: saved to ${path.basename(saveUri.fsPath)}`);
+        } catch (e) {
+            vscode.window.showErrorMessage(`Netron: export failed – ${e instanceof Error ? e.message : String(e)}`);
+        }
     }
 
     private _buildHtml(

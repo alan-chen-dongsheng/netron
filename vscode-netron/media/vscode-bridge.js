@@ -158,6 +158,21 @@
                     return new this.window.Worker(URL.createObjectURL(blob), { type: 'module' });
                 };
 
+                // Fix Host.export(): <a download>.click() doesn't work in a sandboxed WebView.
+                // Convert the blob to base64 and hand it to the extension host, which shows
+                // VS Code's native Save dialog and writes the file.
+                window.exports.browser.Host.prototype.export = async function (file, blob) {
+                    const reader = new FileReader();
+                    await new Promise((resolve, reject) => {
+                        reader.onload = resolve;
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+                    // result is "data:<mime>;base64,<data>"
+                    const base64 = String(reader.result).split(',')[1];
+                    vscode.postMessage({ command: 'export', name: file, mime: blob.type, data: base64 });
+                };
+
                 // Fix timing: view.View.start() has three awaits BEFORE it sets
                 // this._select (the TargetSelector). If we send 'ready' as soon as
                 // window.__view__ exists (i.e. right after construction), the model
