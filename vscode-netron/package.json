@@ -1,0 +1,45 @@
+{
+    "name": "vscode-netron",
+    "displayName": "Netron Model Viewer",
+    "description": "Visualize neural network models (ONNX, TensorFlow, PyTorch, etc.) in VS Code",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.74.0"
+    },
+    "categories": ["Visualization"],
+    "activationEvents": [],
+    "main": "./out/extension.js",
+    "contributes": {
+        "customEditors": [
+            {
+                "viewType": "netron.modelView",
+                "displayName": "Netron Model Viewer",
+                "selector": [
+                    { "filenamePattern": "*.onnx" },
+                    { "filenamePattern": "*.pb" },
+                    { "filenamePattern": "*.tflite" },
+                    { "filenamePattern": "*.circle" },
+                    { "filenamePattern": "*.pt" },
+                    { "filenamePattern": "*.pth" },
+                    { "filenamePattern": "*.keras" },
+                    { "filenamePattern": "*.h5" },
+                    { "filenamePattern": "*.mlmodel" },
+                    { "filenamePattern": "*.mlpackage" },
+                    { "filenamePattern": "*.caffemodel" },
+                    { "filenamePattern": "*.gguf" },
+                    { "filenamePattern": "*.safetensors" }
+                ],
+                "priority": "default"
+            }
+        ]
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/node": "^18.0.0",
+        "@types/vscode": "^1.74.0",
+        "typescript": "^5.0.0"
+    }
+}
